@@ -1,6 +1,4 @@
 # Research Application Optimizer (RAO) - Project Documentation
-![WhatsApp Image 2025-12-19 at 22 34 25_f7373bb0](https://github.com/user-attachments/assets/be322a74-5542-417a-84d6-bc0719e86047)
-
 ## Page 1: Project Overview & Getting Started
 ### 1. Executive Summary
 Project Name: Research Application Optimizer (RAO)  
@@ -81,18 +79,24 @@ The optimize() function in app.py is the application's brain. It executes the fo
 ## Page 3: User Guide & Workflows
 ### 1. Student Workflow
 Students use the platform to find opportunities and craft high-quality applications.
-*	Dashboard (/student): The "Optimizer" interface.
+
+![WhatsApp Image 2025-12-19 at 22 34 25_f7373bb0](https://github.com/user-attachments/assets/be322a74-5542-417a-84d6-bc0719e86047)
+
+
+#### *	Dashboard (/student): The "Optimizer" interface.
  *	Input: Paste a link to a research paper (ArXiv) or a job description.
- *	![Image](https://github.com/user-attachments/assets/0bacc27e-c6a1-41bc-a7d0-18c9ea2fce82)
  *	Process: Click "Optimize". The system analyzes the text in real-time.
  *	Result: View a summary, required skills, and an editable AI-drafted email.
-*	Trending Opportunities (/papers): A feed of open positions posted by professors.
+ *	Trending Opportunities (/papers): A feed of open positions posted by professors.
  *	Students can "Quick Apply" or use "Review & Apply" to let AI analyze the posting before applying.
- *	<img width="1208" height="839" alt="Image" src="https://github.com/user-attachments/assets/f7993565-97b0-402b-aa35-3e5ff8ddb1bc" />
 *	Application Tracking (/my_applications): View status of sent applications (Pending/Selected).
-*	<img width="1210" height="779" alt="Image" src="https://github.com/user-attachments/assets/19161020-4545-4e5e-8308-4dd2bde73ba4" />
+
 ### 2. Professor Workflow
 Professors use the platform to manage recruitment overhead.
+
+![WhatsApp Image 2025-12-19 at 22 35 01_c5e359f8](https://github.com/user-attachments/assets/1ba4eea2-86d6-4097-83c3-06c938aa3e96)
+
+
 #### *	Dashboard (/professor):
  *	Post Opportunity: Manually create a listing for a specific project.
  *	Auto-Generate Feed: One-click feature that fetches the latest AI papers from ArXiv and converts them into draft internship listings automatically.
@@ -100,7 +104,7 @@ Professors use the platform to manage recruitment overhead.
  *	View a table of candidates.
  *	Actions: Download attached Resumes (PDF), read the specific Cover Letter, and "Select" candidates.
  *	Inbox: A specific inbox for "Cold Applications" (unsolicited applications generated via the Optimizer).
- *	<img width="1208" height="838" alt="Image" src="https://github.com/user-attachments/assets/d904d3da-2233-4cda-b7b3-61af6fd36a39" />
+ 
 ### 3. Key Features Breakdown
 | Feature | Description | Tech Used |
 | :---       | :---:        | ---:        |
