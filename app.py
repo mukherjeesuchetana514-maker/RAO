@@ -55,29 +55,14 @@ if api_key:
 
 
 def get_active_model():
-    """Finds a working Gemini model dynamically."""
-    try:
-        if not api_key:
-            return None
-        # 1. Prefer Flash (Faster/Cheaper)
-        for m in genai.list_models():
-            if (
-                "generateContent" in m.supported_generation_methods
-                and "flash" in m.name.lower()
-            ):
-                print(f"✅ Using Model: {m.name}")
-                return genai.GenerativeModel(m.name)
-        # 2. Fallback to Pro
-        for m in genai.list_models():
-            if (
-                "generateContent" in m.supported_generation_methods
-                and "pro" in m.name.lower()
-            ):
-                return genai.GenerativeModel(m.name)
-        return genai.GenerativeModel("gemini-1.5-flash")
-    except Exception as e:
-        print(f"Model Error: {e}")
-        return genai.GenerativeModel("gemini-pro")
+    """Forces the use of the stable Gemini 1.5 Flash model."""
+    if not api_key:
+        print("⚠️ No API Key found.")
+        return None
+
+    # Force use of the high-quota stable model
+    print("✅ Using Model: gemini-1.5-flash")
+    return genai.GenerativeModel("gemini-1.5-flash")
 
 
 active_model = get_active_model()
