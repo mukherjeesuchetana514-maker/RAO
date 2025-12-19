@@ -6,3 +6,7 @@ arxiv
 werkzeug
 gunicorn
 psycopg2-binary
+beautifulsoup4
+requests
+duckduckgo-search
+python-dotenv
