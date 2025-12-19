@@ -1,452 +1,815 @@
 import os
-import google.generativeai as genai
+import time
+import json
+import re
+import requests
 import arxiv
+import xml.etree.ElementTree as ET
+from bs4 import BeautifulSoup
+from duckduckgo_search import DDGS
+import google.generativeai as genai
 import secrets
 from datetime import datetime, timedelta
-from flask import Flask, render_template, request, redirect, url_for, jsonify, send_from_directory, flash
-from flask_login import LoginManager, login_user, login_required, current_user, logout_user, UserMixin
+from flask import (
+    Flask,
+    render_template,
+    request,
+    redirect,
+    url_for,
+    jsonify,
+    send_from_directory,
+    flash,
+)
+from flask_login import (
+    LoginManager,
+    login_user,
+    login_required,
+    current_user,
+    logout_user,
+    UserMixin,
+)
 from werkzeug.utils import secure_filename
 from flask_sqlalchemy import SQLAlchemy
 from dotenv import load_dotenv
 
-app = Flask(__name__)
-app.config['SECRET_KEY'] = 'devsync-secret'
+load_dotenv()
 
-# --- 1. CONFIGURATION (Render Compatible) ---
-# Check for Render's database URL, otherwise use local SQLite
+app = Flask(__name__)
+app.config["SECRET_KEY"] = "devsync-secret"
+
+# --- 1. CONFIGURATION ---
 database_url = os.environ.get("DATABASE_URL")
 if database_url and database_url.startswith("postgres://"):
     database_url = database_url.replace("postgres://", "postgresql://", 1)
 
-app.config['SQLALCHEMY_DATABASE_URI'] = database_url or 'sqlite:///devsync.db'
+app.config["SQLALCHEMY_DATABASE_URI"] = database_url or "sqlite:///devsync.db"
+app.config["UPLOAD_FOLDER"] = "static/uploads"
+os.makedirs(app.config["UPLOAD_FOLDER"], exist_ok=True)
 
-# NOTE: Render Free Tier deletes local files (resumes) on restart.
-# To persist files, you need a paid "Disk" or Cloud storage (S3/Cloudinary).
-app.config['UPLOAD_FOLDER'] = 'static/uploads'
-os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+# --- 2. ADVANCED AI ENGINE INTEGRATION ---
 
-# --- 2. CONFIGURE GEMINI API ---
-genai.configure(api_key = os.getenv("GEMINI_API_KEY"))
-model = genai.GenerativeModel('models/gemini-flash-latest')
+# Configure Gemini
+api_key = os.getenv("GEMINI_API_KEY")
+if api_key:
+    genai.configure(api_key=api_key)
 
-# --- 3. DATABASE CONFIGURATION & MODELS ---
+
+def get_active_model():
+    """Dynamically finds the best available Gemini model."""
+    if not api_key:
+        print("⚠️ No API Key found.")
+        return None
+
+    try:
+        # 1. Get list of ALL available models for your API key
+        available_models = [
+            m.name
+            for m in genai.list_models()
+            if "generateContent" in m.supported_generation_methods
+        ]
+        print(f"📋 Available Models: {available_models}")
+
+        # 2. Define our preference order (Best/Cheapest -> Older)
+        preferences = [
+            "models/gemini-1.5-flash",
+            "models/gemini-1.5-flash-001",
+            "models/gemini-1.5-flash-002",
+            "models/gemini-1.5-flash-latest",
+            "models/gemini-pro",
+            "models/gemini-1.0-pro",
+        ]
+
+        # 3. Pick the first preference that exists in your account
+        for model_name in preferences:
+            if model_name in available_models:
+                print(f"✅ Selected Model: {model_name}")
+                return genai.GenerativeModel(model_name)
+
+        # 4. Fallback: If none of our preferences match, pick the first available one
+        if available_models:
+            first_model = available_models[0]
+            print(f"⚠️ Preferred models missing. Falling back to: {first_model}")
+            return genai.GenerativeModel(first_model)
+
+    except Exception as e:
+        print(f"❌ Error listing models: {e}")
+        # Final "Hail Mary" fallback
+        return genai.GenerativeModel("gemini-pro")
+
+    return None
+
+
+active_model = get_active_model()
+
+# --- HELPER FUNCTIONS FROM AI_ENGINE.PY ---
+
+
+def clean_json_text(text):
+    """Clean markdown and extra text from AI response to extract valid JSON."""
+    try:
+        text = text.replace("```json", "").replace("```", "").strip()
+        start = text.find("{")
+        end = text.rfind("}") + 1
+        if start != -1 and end != -1:
+            text = text[start:end]
+        return text
+    except:
+        return text
+
+
+def is_valid_url(url):
+    if not url:
+        return False
+    academic_signals = [
+        ".edu",
+        ".ac.",
+        ".org",
+        "university",
+        "institute",
+        "lab",
+        "research",
+        "faculty",
+        "prof",
+    ]
+    if not any(signal in url.lower() for signal in academic_signals):
+        return False
+    blacklist = ["youtube", "facebook", "twitter", "linkedin", "instagram", "tiktok"]
+    for bad in blacklist:
+        if bad in url.lower():
+            return False
+    return True
+
+
+def scrape_website_text(url):
+    if not url:
+        return ""
+    headers = {"User-Agent": "Mozilla/5.0"}
+    try:
+        response = requests.get(url, headers=headers, timeout=5)
+        if response.status_code != 200:
+            return ""
+        soup = BeautifulSoup(response.text, "html.parser")
+        for script in soup(["script", "style", "nav", "footer"]):
+            script.extract()
+        text = soup.get_text()
+        return " ".join(text.split())[:6000]  # Limit context size
+    except:
+        return ""
+
+
+def find_lab_url(professor_name):
+    """Finds the professor's lab website."""
+    if not professor_name:
+        return None
+    query = f"{professor_name} research lab official website"
+    ddgs = DDGS()
+    try:
+        results = ddgs.text(query, max_results=3)
+        if results:
+            for res in results:
+                if is_valid_url(res["href"]):
+                    return res["href"]
+    except:
+        pass
+    return None
+
+
+def extract_arxiv_id(url):
+    """Extracts ArXiv ID from a URL."""
+    match = re.search(r"arxiv.org/(?:abs|pdf)/(\d+\.\d+)", url)
+    if match:
+        return match.group(1)
+    return None
+
+
+def get_paper_metadata(query):
+    print(f"🔍 Fetching metadata for: {query}")
+
+    # 0. Check if input is an ArXiv URL and extract ID
+    arxiv_id = extract_arxiv_id(query)
+    if arxiv_id:
+        print(f"✅ Detected ArXiv ID: {arxiv_id}")
+        query = arxiv_id  # Search by ID instead of URL for better results
+
+    # 1. Try Semantic Scholar
+    try:
+        url = "https://api.semanticscholar.org/graph/v1/paper/search"
+        params = {"query": query, "limit": 1, "fields": "title,abstract,authors,venue"}
+        res = requests.get(url, params=params, timeout=4)
+        if res.status_code == 200:
+            data = res.json()
+            if data.get("data") and len(data["data"]) > 0:
+                print("✅ Found via Semantic Scholar")
+                return data["data"][0]
+    except Exception as e:
+        print(f"⚠️ Semantic Scholar Error: {e}")
+
+    # 2. Fallback to ArXiv API
+    try:
+        # If query is an ID, use id_list, else use search_query
+        if arxiv_id:
+            url = f"http://export.arxiv.org/api/query?id_list={arxiv_id}"
+        else:
+            safe_query = query.replace(" ", "+")
+            url = f"http://export.arxiv.org/api/query?search_query=all:{safe_query}&start=0&max_results=1"
+
+        data = requests.get(url).content
+        root = ET.fromstring(data)
+        ns = {"atom": "http://www.w3.org/2005/Atom"}
+        entry = root.find("atom:entry", ns)
+
+        if entry:
+            print("✅ Found via ArXiv API")
+            title = entry.find("atom:title", ns).text.strip()
+            summary = entry.find("atom:summary", ns).text.strip()
+            authors = [
+                {"name": author.find("atom:name", ns).text}
+                for author in entry.findall("atom:author", ns)
+            ]
+
+            # Sanity check: If summary is extremely short or empty, consider it a failure
+            if len(summary) < 50:
+                return {
+                    "title": query,
+                    "abstract": "Abstract content unavailable.",
+                    "authors": [],
+                }
+
+            return {
+                "title": title,
+                "abstract": summary,
+                "authors": authors,
+                "venue": "ArXiv",
+            }
+    except Exception as e:
+        print(f"⚠️ ArXiv Error: {e}")
+
+    print("❌ Metadata lookup failed.")
+    return {
+        "title": query,
+        "abstract": "No abstract found. Please provide text content directly.",
+        "authors": [],
+    }
+
+
+# --- 3. DATABASE MODELS ---
 db = SQLAlchemy(app)
 
-# Define User Model
+
 class User(UserMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
     email = db.Column(db.String(100), unique=True, nullable=False)
     password = db.Column(db.String(100), nullable=False)
-    role = db.Column(db.String(50), nullable=False) # 'Student' or 'Professor'
+    role = db.Column(db.String(50), nullable=False)
     full_name = db.Column(db.String(100))
     qualification = db.Column(db.String(100))
     college = db.Column(db.String(100))
     phone = db.Column(db.String(20))
-    resume_file = db.Column(db.String(200)) # Stores filename
-    
-    # --- NEW COLUMNS FOR PASSWORD RESET ---
+    resume_file = db.Column(db.String(200))
     reset_token = db.Column(db.String(100), nullable=True)
     token_expiry = db.Column(db.DateTime, nullable=True)
-    
-    # Relationships
-    internships = db.relationship('Internship', backref='author', lazy=True)
-    applications = db.relationship('Application', backref='student', lazy=True)
+    internships = db.relationship("Internship", backref="author", lazy=True)
+    applications = db.relationship("Application", backref="student", lazy=True)
 
-# Define Internship Model
+
 class Internship(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     title = db.Column(db.String(200), nullable=False)
     domain = db.Column(db.String(100))
     description = db.Column(db.Text)
-    type = db.Column(db.String(50)) # Remote, Onsite
-    pdf_link = db.Column(db.String(500)) # For generated papers
-    # [NEW COLUMN] For Professor to set vacancies manually
-    vacancies = db.Column(db.String(50), default="Open") 
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    
-    # Relationships
-    applications = db.relationship('Application', backref='internship', lazy=True)
+    type = db.Column(db.String(50))
+    pdf_link = db.Column(db.String(500))
+    vacancies = db.Column(db.String(50), default="Open")
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    applications = db.relationship("Application", backref="internship", lazy=True)
 
-# Define Application Model
+
 class Application(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    student_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    internship_id = db.Column(db.Integer, db.ForeignKey('internship.id'), nullable=True) # Make nullable for external papers
-    cover_letter = db.Column(db.Text, nullable=True) 
+    student_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    internship_id = db.Column(db.Integer, db.ForeignKey("internship.id"), nullable=True)
+    cover_letter = db.Column(db.Text, nullable=True)
     status = db.Column(db.String(50), default="Pending")
+
 
 # --- 4. LOGIN MANAGER ---
 login_manager = LoginManager()
 login_manager.init_app(app)
-login_manager.login_view = 'index'
+login_manager.login_view = "index"
+
 
 @login_manager.user_loader
 def load_user(user_id):
     return User.query.get(int(user_id))
 
+
 # --- 5. ROUTES ---
 
-@app.route('/')
+
+@app.route("/")
 def index():
     if current_user.is_authenticated:
-        return redirect('/professor' if current_user.role == 'Professor' else '/student')
-    return render_template('index.html')
+        return redirect(
+            "/professor" if current_user.role == "Professor" else "/student"
+        )
+    return render_template("index.html")
 
-@app.route('/login', methods=['POST'])
+
+@app.route("/login", methods=["POST"])
 def login():
-    email = request.form.get('email')
-    password = request.form.get('password')
+    email = request.form.get("email")
+    password = request.form.get("password")
     user = User.query.filter_by(email=email).first()
-    
     if user and user.password == password:
         login_user(user)
-        flash('Welcome back, ' + user.full_name.split()[0] + '!', 'success')
-        return redirect('/professor' if user.role == 'Professor' else '/student')
-    
-    flash('Invalid email or password. Please try again.', 'error')
-    return redirect('/')
+        flash("Welcome back, " + user.full_name.split()[0] + "!", "success")
+        return redirect("/professor" if user.role == "Professor" else "/student")
+    flash("Invalid email or password.", "error")
+    return redirect("/")
 
-@app.route('/signup', methods=['POST'])
+
+@app.route("/signup", methods=["POST"])
 def signup():
-    email = request.form.get('email')
-    if User.query.filter_by(email=email).first(): 
-        flash('Account already exists! Please log in.', 'warning')
-        return redirect('/') 
-    
-    new_user = User(email=email, password=request.form.get('password'), 
-                    role=request.form.get('role'), full_name=request.form.get('full_name'))
+    email = request.form.get("email")
+    if User.query.filter_by(email=email).first():
+        flash("Account already exists!", "warning")
+        return redirect("/")
+    new_user = User(
+        email=email,
+        password=request.form.get("password"),
+        role=request.form.get("role"),
+        full_name=request.form.get("full_name"),
+    )
     db.session.add(new_user)
     db.session.commit()
     login_user(new_user)
-    return redirect('/setup')
+    return redirect("/setup")
 
-@app.route('/setup', methods=['GET', 'POST'])
+
+@app.route("/setup", methods=["GET", "POST"])
 @login_required
 def setup():
-    if request.method == 'POST':
-        current_user.full_name = request.form.get('full_name')
-        current_user.qualification = request.form.get('qualification')
-        current_user.college = request.form.get('college')
-        current_user.phone = request.form.get('phone')
-        # Check if research_domain is in form (for professors)
-        if 'research_domain' in request.form:
-             current_user.research_domain = request.form.get('research_domain')
-        
-        # Handle Resume Upload
-        if 'resume' in request.files:
-            file = request.files['resume']
-            if file.filename != '':
+    if request.method == "POST":
+        current_user.full_name = request.form.get("full_name")
+        current_user.qualification = request.form.get("qualification")
+        current_user.college = request.form.get("college")
+        current_user.phone = request.form.get("phone")
+        if "research_domain" in request.form:
+            current_user.research_domain = request.form.get("research_domain")
+        if "resume" in request.files:
+            file = request.files["resume"]
+            if file.filename != "":
                 filename = secure_filename(f"{current_user.id}_{file.filename}")
-                file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
+                file.save(os.path.join(app.config["UPLOAD_FOLDER"], filename))
                 current_user.resume_file = filename
-
         db.session.commit()
-        return redirect('/professor' if current_user.role == 'Professor' else '/student')
-    return render_template('setup.html')
+        return redirect(
+            "/professor" if current_user.role == "Professor" else "/student"
+        )
+    return render_template("setup.html")
 
-@app.route('/submit_application', methods=['POST'])
+
+@app.route("/submit_application", methods=["POST"])
 @login_required
 def submit_application():
-    # 1. Handle File Upload
-    file = request.files.get('resume')
+    file = request.files.get("resume")
     if file:
         filename = secure_filename(f"{current_user.id}_{file.filename}")
-        file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
+        file.save(os.path.join(app.config["UPLOAD_FOLDER"], filename))
         current_user.resume_file = filename
-    
-    # 2. Handle Cover Letter Text
-    cover_text = request.form.get('cover_letter')
-    
-    # 3. Create an Application Record
-    existing_app = Application.query.filter_by(student_id=current_user.id, internship_id=None).first()
-    
+    cover_text = request.form.get("cover_letter")
+    existing_app = Application.query.filter_by(
+        student_id=current_user.id, internship_id=None
+    ).first()
     if existing_app:
-        existing_app.cover_letter = cover_text # Update existing
+        existing_app.cover_letter = cover_text
     else:
         new_app = Application(
-            student_id=current_user.id,
-            internship_id=None, # None means it's an external/general application
-            cover_letter=cover_text
+            student_id=current_user.id, internship_id=None, cover_letter=cover_text
         )
         db.session.add(new_app)
-        
     db.session.commit()
-    return jsonify({'status': 'success', 'message': 'Application Sent Successfully!'})
+    return jsonify({"status": "success", "message": "Application Sent Successfully!"})
 
-@app.route('/download_resume/<filename>')
+
+@app.route("/download_resume/<filename>")
 @login_required
 def download_resume(filename):
-    return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
+    return send_from_directory(app.config["UPLOAD_FOLDER"], filename)
 
-# --- STUDENT ROUTES ---
-@app.route('/student')
+
+@app.route("/student")
 @login_required
 def student():
-    if current_user.role == 'Professor': return redirect('/professor')
-    # Fetch applications so they can be displayed under the navbar
+    if current_user.role == "Professor":
+        return redirect("/professor")
     apps = Application.query.filter_by(student_id=current_user.id).all()
-    return render_template('student.html', applications=apps)
+    return render_template("student.html", applications=apps)
 
-@app.route('/papers')
+
+@app.route("/papers")
 @login_required
 def papers():
     internships = Internship.query.all()
-    my_apps = [app.internship_id for app in Application.query.filter_by(student_id=current_user.id).all()]
-    return render_template('papers.html', internships=internships, my_apps=my_apps)
+    my_apps = [
+        app.internship_id
+        for app in Application.query.filter_by(student_id=current_user.id).all()
+    ]
+    return render_template("papers.html", internships=internships, my_apps=my_apps)
 
-# [NEW FEATURE] Student "My Applications" Status Page
-@app.route('/my_applications')
+
+@app.route("/my_applications")
 @login_required
 def my_applications():
-    if current_user.role != 'Student': 
-        return redirect('/')
-        # Fetch all applications for the current student
+    if current_user.role != "Student":
+        return redirect("/")
     apps = Application.query.filter_by(student_id=current_user.id).all()
-    return render_template('my_applications.html', applications=apps)
+    return render_template("my_applications.html", applications=apps)
 
-# [UPDATED AI FLOW] Handles both URL and Description text
-@app.route('/optimize', methods=['POST'])
+
+# --- THE UPGRADED OPTIMIZE ROUTE ---
+@app.route("/optimize", methods=["POST"])
 @login_required
 def optimize():
     data = request.json
-    # We accept 'content' which could be a URL OR Description text
-    content_input = data.get('content', '')
+    content_input = data.get("content") or data.get("url") or ""
+    professor_name = data.get("professor_name", "")
 
+    # 1. Gather Metadata (Paper Info + Lab Website)
+    paper_data = get_paper_metadata(content_input)
+
+    # Check if we ACTUALLY got data
+    is_valid_paper = paper_data.get(
+        "abstract"
+    ) and "No abstract found" not in paper_data.get("abstract")
+
+    # If professor_name is missing, try to guess from paper authors (Last author usually PI)
+    if not professor_name and paper_data.get("authors"):
+        try:
+            professor_name = paper_data["authors"][-1]["name"]
+            print(f"🤖 Auto-detected Professor/PI: {professor_name}")
+        except:
+            pass
+
+    lab_text = ""
+    lab_url = ""
+
+    if professor_name:
+        lab_url = find_lab_url(professor_name)
+        if lab_url:
+            lab_text = scrape_website_text(lab_url)
+
+    # 2. Build the Advanced Prompt
     prompt = f"""
-    Act as a Research Assistant. Analyze the following internship or research paper content:
-    "{content_input}"
-    Task 1: Extract the Lead Author's Full Name (this is the Professor).
-    Task 2: Identify the main topic or professor requirements.
-    Task 3: Write a cold email from {current_user.full_name} ({current_user.qualification}) to the professor.
+    Act as a Research Consultant.
     
-    Strictly follow this output format with dividers:
-    PROFESSOR: [Name]
-    SUMMARY: [2 sentence summary]
-    SKILLS: [Skill 1, Skill 2, Skill 3]
-    METRICS: [Citation Score as a number, e.g., 450] | [Applicants as a number or the word 'Many']
-    EMAIL: [Email Body]
+    PAPER TITLE: {paper_data.get("title")}
+    PAPER ABSTRACT: {paper_data.get("abstract")}
+    
+    PROFESSOR: {professor_name if professor_name else "Unknown"}
+    LAB WEBSITE CONTEXT: {lab_text if lab_text else "Not available"}
+    
+    STUDENT: {current_user.full_name}, {current_user.qualification} at {current_user.college}
+    
+    IMPORTANT: 
+    1. If the PAPER ABSTRACT above indicates 'No abstract found' or is missing, DO NOT Hallucinate a summary. 
+       Instead, return a summary stating "Could not extract paper details. Please verify the URL." 
+       and set Skills to "Manual Review".
+    2. If the abstract IS available, generate a highly specific cold email.
+    
+    Goal: Write a highly specific cold email for an internship.
+    
+    OUTPUT JSON ONLY (No Markdown):
+    {{
+        "summary": "2 sentence summary of the paper/topic",
+        "skills": ["Skill1", "Skill2", "Skill3"],
+        "citation_score": "Impact level (e.g. High, Medium, or Citation Count)",
+        "vacancies": "Potential Role (e.g. Research Assistant)",
+        "applicants": "Estimate (e.g. High, Medium)",
+        "application": "The cold email body. Address 'Dear Prof. [Last Name]' using the PROFESSOR name provided above. Mention specific details from the abstract or lab context."
+    }}
     """
 
     try:
-        response = model.generate_content(prompt)
-        text = response.text
-        
-        # Parsing Logic
-        summary = text.split("SUMMARY:")[1].split("SKILLS:")[0].strip()
-        skills = text.split("SKILLS:")[1].split("METRICS:")[0].strip()
-        metrics_raw = text.split("METRICS:")[1].split("EMAIL:")[0].strip()
-        email_body = text.split("EMAIL:")[1].strip()
+        # Use the global active model
+        response = active_model.generate_content(
+            prompt, generation_config={"response_mime_type": "application/json"}
+        )
 
-        metrics = [m.strip() for m in metrics_raw.split('|')]
+        # Robust Parsing
+        try:
+            result = json.loads(response.text)
+        except:
+            # Fallback for older models that don't enforce JSON strictly
+            cleaned_text = clean_json_text(response.text)
+            result = json.loads(cleaned_text)
 
-        return jsonify({
-            "analysis": {
-                "summary": summary,
-                "skills": skills.split(','),
-                "citation_score": metrics[0] if (len(metrics) > 0 and metrics[0].strip() != "N/A") else "450+",                "vacancies": "Check Listing", # We use real data if available
-                "applicants": metrics[1] if (len(metrics) > 1 and "High" not in metrics[1]) else "Many",
-            },
-            "application": email_body
-        })
+        # Map to Frontend Expected Format
+        return jsonify(
+            {
+                "analysis": {
+                    "summary": result.get("summary", "Analysis unavailable."),
+                    "skills": result.get("skills", ["General Research"]),
+                    "citation_score": result.get("citation_score", "N/A"),
+                    "vacancies": result.get("vacancies", "Open"),
+                    "applicants": result.get("applicants", "Many"),
+                },
+                "application": result.get("application", "Error generating email."),
+            }
+        )
+
     except Exception as e:
-        print("GEMINI ERROR:", e)
-        return jsonify({"error": f"AI Error: {str(e)}"})
+        print("AI AGENT ERROR:", e)
+        # Fallback response so frontend doesn't crash
+        return jsonify(
+            {
+                "analysis": {
+                    "summary": "Could not analyze content deeper.",
+                    "skills": ["Manual Review"],
+                    "citation_score": "N/A",
+                    "vacancies": "Check Listing",
+                    "applicants": "Unknown",
+                },
+                "application": f"Dear Prof. {professor_name.split()[-1] if professor_name else ''},\n\nI am writing to express my interest in your research...",
+            }
+        )
 
-# [UPDATED] Apply Route - Handles AI Cover Letter & Resume
-@app.route('/apply/<int:internship_id>', methods=['POST'])
+
+@app.route("/apply/<int:internship_id>", methods=["POST"])
 @login_required
 def apply_for_internship(internship_id):
-    existing = Application.query.filter_by(student_id=current_user.id, internship_id=internship_id).first()
-    
-    # Capture the AI generated cover letter from the form
-    cover_letter = request.form.get('cover_letter', 'Interested in this role.')
+    existing = Application.query.filter_by(
+        student_id=current_user.id, internship_id=internship_id
+    ).first()
+    cover_letter = request.form.get("cover_letter", "Interested in this role.")
 
     if not existing:
         new_app = Application(
-            student_id=current_user.id, 
+            student_id=current_user.id,
             internship_id=internship_id,
             cover_letter=cover_letter,
-            status="Pending"
+            status="Pending",
         )
         db.session.add(new_app)
         db.session.commit()
-    
-    # Handle Resume upload during quick apply
-    file = request.files.get('resume')
+
+    file = request.files.get("resume")
     if file:
         filename = secure_filename(f"{current_user.id}_{file.filename}")
-        file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
+        file.save(os.path.join(app.config["UPLOAD_FOLDER"], filename))
         current_user.resume_file = filename
         db.session.commit()
 
-    return redirect('/my_applications')
+    return redirect("/my_applications")
 
-# --- ADD THIS TO app.py ---
 
-@app.route('/cold_applications')
+@app.route("/cold_applications")
 @login_required
 def cold_applications():
-    if current_user.role != 'Professor': return "Unauthorized"
-    
-    # Fetch applications that are NOT linked to a specific job post
-    # (These are the ones sent via the Student Optimizer)
+    if current_user.role != "Professor":
+        return "Unauthorized"
     applications = Application.query.filter_by(internship_id=None).all()
-    
-    return render_template('applicants.html', applications=applications)
+    return render_template("applicants.html", applications=applications)
 
-# --- PROFESSOR ROUTES ---
-@app.route('/professor')
+
+@app.route("/professor")
 @login_required
 def professor():
-    if current_user.role != 'Professor': return redirect('/student')
+    if current_user.role != "Professor":
+        return redirect("/student")
     my_internships = Internship.query.filter_by(user_id=current_user.id).all()
-    return render_template('professor.html', internships=my_internships)
+    return render_template("professor.html", internships=my_internships)
 
-@app.route('/post_internship', methods=['POST'])
+
+@app.route("/post_internship", methods=["POST"])
 @login_required
 def post_internship():
-    if current_user.role != 'Professor': return "Unauthorized"
+    if current_user.role != "Professor":
+        return "Unauthorized"
     new_internship = Internship(
-        title=request.form.get('title'),
-        domain=request.form.get('domain'),
-        description=request.form.get('description'),
-        type=request.form.get('type'),
+        title=request.form.get("title"),
+        domain=request.form.get("domain"),
+        description=request.form.get("description"),
+        type=request.form.get("type"),
         user_id=current_user.id,
-        # [NEW] Capture vacancies from form
-        vacancies=request.form.get('vacancies') or "Open"
+        vacancies=request.form.get("vacancies") or "Open",
     )
     db.session.add(new_internship)
     db.session.commit()
-    return redirect('/professor')
+    return redirect("/professor")
 
-@app.route('/view_applicants/<int:id>')
+
+@app.route("/view_applicants/<int:id>")
 @login_required
 def view_applicants(id):
     internship = Internship.query.get(id)
-    if internship.user_id != current_user.id: return "Unauthorized"
+    if internship.user_id != current_user.id:
+        return "Unauthorized"
     applications = Application.query.filter_by(internship_id=id).all()
-    return render_template('applicants.html', internship=internship, applications=applications)
+    return render_template(
+        "applicants.html", internship=internship, applications=applications
+    )
 
-@app.route('/all_applications')
+
+@app.route("/all_applications")
 @login_required
 def all_applications():
-    if current_user.role != 'Professor': return "Unauthorized"
+    if current_user.role != "Professor":
+        return "Unauthorized"
     my_internships = Internship.query.filter_by(user_id=current_user.id).all()
     my_internship_ids = [i.id for i in my_internships]
-    applications = Application.query.filter(Application.internship_id.in_(my_internship_ids)).all()
-    return render_template('applicants.html', applications=applications)
+    applications = Application.query.filter(
+        Application.internship_id.in_(my_internship_ids)
+    ).all()
+    return render_template("applicants.html", applications=applications)
 
-# [NEW FEATURE] Professor Select/Accept Student Logic
-@app.route('/accept_applicant/<int:app_id>')
+
+@app.route("/accept_applicant/<int:app_id>")
 @login_required
 def accept_applicant(app_id):
-    if current_user.role != 'Professor': return "Unauthorized"
-    
+    if current_user.role != "Professor":
+        return "Unauthorized"
     application = Application.query.get(app_id)
     if application:
         application.status = "Selected"
         db.session.commit()
         flash(f"Student {application.student.full_name} has been selected!", "success")
-        
-    return redirect(request.referrer or '/professor')
+    return redirect(request.referrer or "/professor")
 
-@app.route('/generate_feed')
+
+@app.route("/generate_feed")
 @login_required
 def generate_feed():
-    if current_user.role != 'Professor': return "Unauthorized"
+    if current_user.role != "Professor":
+        return "Unauthorized"
 
-    client = arxiv.Client()
-    search = arxiv.Search(
-        query = "artificial intelligence",
-        max_results = 5,
-        sort_by = arxiv.SortCriterion.SubmittedDate
-    )
-
-    for result in client.results(search):
-        try:
-            prompt = f"Summarize this research abstract into a 2-sentence internship opportunity description: {result.summary}"
-            response = model.generate_content(prompt)
-            ai_description = response.text
-        except:
-            ai_description = result.summary[:200] + "..."
-
-        new_internship = Internship(
-            title = result.title,
-            domain = "AI & Machine Learning",
-            description = ai_description,
-            type = "Remote Research",
-            user_id = current_user.id,
-            pdf_link = result.pdf_url,
-            vacancies = "2" # Default for auto-generated posts
+    try:
+        client = arxiv.Client()
+        search = arxiv.Search(
+            query="artificial intelligence",
+            max_results=3,
+            sort_by=arxiv.SortCriterion.SubmittedDate,
         )
-        db.session.add(new_internship)
 
-    db.session.commit()
-    return redirect('/professor')
+        count = 0
+        for result in client.results(search):
+            if Internship.query.filter_by(title=result.title).first():
+                continue
 
-@app.route('/contact')
+            try:
+                prompt = f"Summarize this research abstract into a 2-sentence internship opportunity description: {result.summary}"
+                response = active_model.generate_content(prompt)
+                ai_description = response.text
+
+                # --- NEW ADDITION: PAUSE FOR 5 SECONDS ---
+                print("Sleeping for 5s to respect API quota...")
+                time.sleep(5)
+                # -----------------------------------------
+
+            except Exception as e:
+                print(f"AI Summary failed: {e}")
+                ai_description = result.summary[:300] + "..."
+
+            new_internship = Internship(
+                title=result.title,
+                domain="AI & Machine Learning",
+                description=ai_description,
+                type="Remote Research",
+                user_id=current_user.id,
+                pdf_link=result.pdf_url,
+                vacancies="2",
+            )
+            db.session.add(new_internship)
+            count += 1
+
+        db.session.commit()
+        if count > 0:
+            flash(f"Successfully added {count} new papers!", "success")
+        else:
+            flash("No new unique papers found.", "warning")
+
+    except Exception as e:
+        print(f"Feed Error: {e}")
+        flash("Error generating feed. Check logs.", "error")
+
+    return redirect("/professor")
+
+
+@app.route("/contact")
 @login_required
 def contact():
-    return render_template('contact.html')
+    return render_template("contact.html")
 
-# --- FORGOT PASSWORD ROUTES ---
 
-@app.route('/forgot_password', methods=['GET', 'POST'])
+@app.route("/forgot_password", methods=["GET", "POST"])
 def forgot_password():
-    if request.method == 'POST':
-        email = request.form.get('email')
+    if request.method == "POST":
+        email = request.form.get("email")
         user = User.query.filter_by(email=email).first()
-        
         if user:
-            # Generate a secure token
             token = secrets.token_hex(16)
             user.reset_token = token
-            # Token valid for 1 hour
             user.token_expiry = datetime.utcnow() + timedelta(hours=1)
             db.session.commit()
-            
-            # SIMULATE EMAIL SENDING (Print to Terminal)
-            reset_link = url_for('reset_password', token=token, _external=True)
-            print(f"\n\n========================================")
-            print(f" PASSWORD RESET LINK (CLICK THIS):")
-            print(f" {reset_link}")
-            print(f"========================================\n\n")
-            
-            flash('Reset link sent to your email (Check Terminal)!', 'success')
+            reset_link = url_for("reset_password", token=token, _external=True)
+            print(f"\n\n=== PASSWORD RESET: {reset_link} ===\n\n")
+            flash("Reset link sent to your email (Check Terminal)!", "success")
         else:
-            flash('Email not found.', 'error')
-            
-        return redirect('/forgot_password')
-        
-    return render_template('forgot_password.html')
+            flash("Email not found.", "error")
+        return redirect("/forgot_password")
+    return render_template("forgot_password.html")
 
-@app.route('/reset_password/<token>', methods=['GET', 'POST'])
+
+@app.route("/reset_password/<token>", methods=["GET", "POST"])
 def reset_password(token):
     user = User.query.filter_by(reset_token=token).first()
-    
-    # Check if token exists and hasn't expired
     if not user or not user.token_expiry or user.token_expiry < datetime.utcnow():
-        flash('Invalid or expired token.', 'error')
-        return redirect('/')
-        
-    if request.method == 'POST':
-        new_password = request.form.get('password')
-        user.password = new_password
-        user.reset_token = None # Clear token
+        flash("Invalid or expired token.", "error")
+        return redirect("/")
+    if request.method == "POST":
+        user.password = request.form.get("password")
+        user.reset_token = None
         user.token_expiry = None
         db.session.commit()
-        
-        flash('Password reset successfully! Please login.', 'success')
-        return redirect('/')
-        
-    return render_template('reset_password.html', token=token)
+        flash("Password reset successfully! Please login.", "success")
+        return redirect("/")
+    return render_template("reset_password.html", token=token)
 
-@app.route('/logout')
+
+@app.route("/logout")
 def logout():
     logout_user()
-    return redirect('/')
+    return redirect("/")
 
-if __name__ == '__main__':
+
+# --- TEMPORARY ROUTE TO INITIALIZE DATABASE ---
+# --- TEMPORARY ROUTE TO INITIALIZE DATABASE ---
+
+
+@app.route("/seed_database")
+def seed_database():
+    # 1. Create Tables
     with app.app_context():
         db.create_all()
-    # For Render, we rely on gunicorn, but debug=True is fine for local
+
+        # 2. Create Professor Account
+        if not User.query.filter_by(email="prof@mit.edu").first():
+            prof = User(
+                email="prof@mit.edu",
+                password="123",
+                role="Professor",
+                full_name="Dr. Elara Vance",
+            )
+            db.session.add(prof)
+            db.session.commit()
+
+        # 3. Add Research Papers
+        prof = User.query.filter_by(email="prof@mit.edu").first()
+
+        papers = [
+            {
+                "title": "Attention Is All You Need",
+                "domain": "Deep Learning",
+                "type": "Remote",
+                "desc": "The seminal paper introducing the Transformer architecture, the foundation of modern LLMs like GPT.",
+            },
+            {
+                "title": "YOLOv8: Real-Time Detection",
+                "domain": "Computer Vision",
+                "type": "Onsite",
+                "desc": "State-of-the-art real-time object detection model offering SOTA performance on COCO dataset.",
+            },
+            {
+                "title": "BERT: Pre-training of Deep Transformers",
+                "domain": "NLP",
+                "type": "Hybrid",
+                "desc": "Bidirectional Encoder Representations from Transformers (BERT) revolutionized NLP tasks.",
+            },
+            {
+                "title": "Llama 2: Open Foundation Models",
+                "domain": "Generative AI",
+                "type": "Remote",
+                "desc": "A collection of open-source pretrained and fine-tuned large language models (LLMs).",
+            },
+        ]
+
+        for p in papers:
+            if not Internship.query.filter_by(title=p["title"]).first():
+                new_paper = Internship(
+                    title=p["title"],
+                    domain=p["domain"],
+                    type=p["type"],
+                    description=p["desc"],
+                    # REMOVED: required_skills line to fix the error
+                    user_id=prof.id,
+                )
+                db.session.add(new_paper)
+
+        db.session.commit()
+        return "✅ Database initialized! <a href='/'>Go to Home</a>"
+
+
+if __name__ == "__main__":
+    with app.app_context():
+        db.create_all()
+    app.run(debug=True)
