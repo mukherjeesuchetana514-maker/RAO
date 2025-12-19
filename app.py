@@ -55,40 +55,49 @@ if api_key:
 
 
 def get_active_model():
-    """Dynamically finds the best available Gemini model."""
+    """Dynamically finds a working high-quota Gemini model."""
     if not api_key:
         print("⚠️ No API Key found.")
         return None
 
     try:
-        # 1. Get list of ALL available models
+        # 1. Get list of available models
         available_models = [
             m.name
             for m in genai.list_models()
             if "generateContent" in m.supported_generation_methods
         ]
-        print(f"📋 Available Models: {available_models}")
 
-        # 2. Define our preference order (Updated for your account)
+        # 2. PRIORITY LIST (Optimized for Free Tier Quota)
+        # We prefer 'latest' aliases because they point to stable, high-quota models.
+        # We avoid explicit '2.0-flash' or '2.5-flash' because they gave you 0 limit errors.
         preferences = [
-            "models/gemini-2.0-flash",  # <--- BEST OPTION FOR YOU
-            "models/gemini-2.0-flash-lite",  # <--- Fast backup
-            "models/gemini-1.5-flash",  # Old standard
-            "models/gemini-1.5-flash-001",
-            "models/gemini-pro",
+            "models/gemini-flash-latest",  # <--- Standard Stable Alias (Best Bet)
+            "models/gemini-flash-lite-latest",  # <--- Lite = High Speed / Low Cost
+            "models/gemini-2.0-flash-lite-preview-02-05",  # <--- Specific Lite Preview
+            "models/gemini-pro-latest",  # <--- Fallback to Pro (Slower but reliable)
+            "models/gemini-1.5-flash-latest",
+            "models/gemini-1.5-flash",
         ]
 
-        # 3. Pick the first preference that exists
+        # 3. Pick the first one that exists
         for model_name in preferences:
             if model_name in available_models:
                 print(f"✅ Selected Model: {model_name}")
                 return genai.GenerativeModel(model_name)
 
-        # 4. Fallback (Avoid 2.5 if possible by picking 2.0 specifically above)
+        # 4. Filter out the "restricted" models (2.5 and 2.0-flash) from fallback
+        # If we fall back to index 0, we might get the broken 2.5-flash again.
+        # Let's try to find ANY 'pro' or '1.5' model in the list.
+        for m in available_models:
+            if "pro" in m and "2.5" not in m:
+                print(f"⚠️ Preferred missing. Fallback to reliable: {m}")
+                return genai.GenerativeModel(m)
+
+        # 5. Last Resort
         if available_models:
-            first_model = available_models[0]
-            print(f"⚠️ Preferred models missing. Falling back to: {first_model}")
-            return genai.GenerativeModel(first_model)
+            print(f"⚠️ deeply falling back to: {available_models[0]}")
+            return genai.GenerativeModel(available_models[0])
 
     except Exception as e:
         print(f"❌ Error listing models: {e}")
