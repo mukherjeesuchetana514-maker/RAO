@@ -43,7 +43,7 @@ if database_url and database_url.startswith("postgres://"):
     database_url = database_url.replace("postgres://", "postgresql://", 1)
 
 app.config["SQLALCHEMY_DATABASE_URI"] = database_url or "sqlite:///devsync.db"
-app.config["UPLOAD_FOLDER"] = "static/uploads"
+app.config["UPLOAD_FOLDER"] = "/tmp"
 os.makedirs(app.config["UPLOAD_FOLDER"], exist_ok=True)
 
 # --- 2. ADVANCED AI ENGINE INTEGRATION ---
