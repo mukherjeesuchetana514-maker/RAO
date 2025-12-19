@@ -24,21 +24,21 @@ The application is built as a monolithic web application using the following tec
     Extract the provided project files into a directory (e.g., RAO_FINAL).
 2.	Install Dependencies
     Navigate to the project root and install the required Python packages.
->> pip install -r requirements.txt
+> pip install -r requirements.txt
 
 3.	Environment Configuration
     Create a .env file in the root directory (if not present) and add your API key:
->> GEMINI_API_KEY=your_google_gemini_api_key_here
->> DATABASE_URL=sqlite:///devsync.db
+> GEMINI_API_KEY=your_google_gemini_api_key_here
+> DATABASE_URL=sqlite:///devsync.db
 
 4.	Database Initialization
     Initialize the database and seed it with default data (like a demo Professor account and trending papers).
->> python seed.py
+> python seed.py
 
     This script creates instance/devsync.db and adds a default professor (prof@mit.edu / 123).
 5.	Running the Application
     Start the Flask development server:
->> python app.py
+> python app.py
 
 ---
 The application will launch at http://127.0.0.1:5000/.
