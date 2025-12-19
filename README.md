@@ -2,8 +2,8 @@
 ## Page 1: Project Overview & Getting Started
 ### 1. Executive Summary
 Project Name: Research Application Optimizer (RAO) 
-Version: 2.0 (AI Powered)
-The Research Application Optimizer (RAO) is a specialized web platform designed to bridge the gap between students seeking research internships and professors looking for talent. Unlike standard job boards, RAO leverages Generative AI (Google Gemini) to analyze research papers and lab websites, helping students generate hyper-personalized cold emails and cover letters. It provides a dual-interface system: a management dashboard for Professors to post opportunities and review applicants, and an "Optimizer" toolkit for Students to find, analyze, and apply to research positions effectively.
+/nVersion: 2.0 (AI Powered)
+/nThe Research Application Optimizer (RAO) is a specialized web platform designed to bridge the gap between students seeking research internships and professors looking for talent. Unlike standard job boards, RAO leverages Generative AI (Google Gemini) to analyze research papers and lab websites, helping students generate hyper-personalized cold emails and cover letters. It provides a dual-interface system: a management dashboard for Professors to post opportunities and review applicants, and an "Optimizer" toolkit for Students to find, analyze, and apply to research positions effectively.
 ### 2. Technical Stack
 The application is built as a monolithic web application using the following technologies:
 *	Backend Framework: Python Flask (Microframework).
