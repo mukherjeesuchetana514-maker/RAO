@@ -72,10 +72,10 @@
     }
 
     .modal-content {
-        background: white; width: 650px; border-radius: 24px; padding: 0;
+        background: white; width: 700px; border-radius: 24px; padding: 0;
         box-shadow: 0 50px 100px -20px rgba(0,0,0,0.3);
         transform: scale(0.95); transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
-        overflow: hidden;
+        overflow: hidden; max-height: 90vh; overflow-y: auto;
     }
 
     /* Animation Classes */
@@ -86,6 +86,28 @@
         background: #f8fafc; padding: 30px; border-bottom: 1px solid #e2e8f0;
         position: relative;
     }
+
+    /* AI Stats Grid */
+    .ai-stats-grid {
+        display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 15px; margin-bottom: 25px;
+    }
+    .stat-box {
+        background: #f1f5f9; padding: 15px; border-radius: 12px; text-align: center;
+    }
+    .stat-label { font-size: 10px; font-weight: 700; color: #64748b; text-transform: uppercase; }
+    .stat-value { font-size: 18px; font-weight: 800; color: #0f172a; margin-top: 5px; }
+
+    /* Loading Spinner */
+    .loading-container {
+        padding: 50px; text-align: center; color: #64748b;
+    }
+    .spinner {
+        width: 40px; height: 40px; border: 4px solid #e2e8f0;
+        border-top: 4px solid #4f46e5; border-radius: 50%;
+        margin: 0 auto 20px; animation: spin 1s linear infinite;
+    }
+    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
 </style>
 
 <div class="header-section">
@@ -115,10 +137,16 @@
             {{ job.description[:120] }}...
         </p>
 
-        <button onclick="openPaperModal('{{ job.id }}', '{{ job.title }}', '{{ job.description|replace('\n', ' ') }}', '{{ job.type }}', 'Python, Machine Learning', '{{ job.pdf_link }}')" 
-            style="background: white; border: 1px solid #e2e8f0; color: #0f172a; padding: 10px 15px; border-radius: 10px; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 8px; width: fit-content; transition: 0.2s;">
-            <i class="fa-solid fa-book-open" style="color: #6366f1;"></i> Read Paper
-        </button>
+        {% if job.id in my_apps %}
+            <button disabled style="background: #dcfce7; border: 1px solid #bbf7d0; color: #166534; padding: 10px 15px; border-radius: 10px; font-weight: 600; cursor: not-allowed; width: fit-content;">
+                <i class="fa-solid fa-check"></i> Applied
+            </button>
+        {% else %}
+            <button onclick="analyzeAndApply('{{ job.id }}', '{{ job.pdf_link if job.pdf_link and job.pdf_link != 'None' else job.description|replace('\n', ' ') }}', '{{ job.title }}', '{{ job.type }}', '{{ job.vacancies }}')" 
+                style="background: white; border: 1px solid #e2e8f0; color: #0f172a; padding: 10px 15px; border-radius: 10px; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 8px; width: fit-content; transition: 0.2s;">
+                <i class="fa-solid fa-wand-magic-sparkles" style="color: #6366f1;"></i> Review & Apply
+            </button>
+        {% endif %}
 
         <div class="card-meta">
             <span><i class="fa-solid fa-user-circle"></i> Prof. Research</span>
@@ -149,28 +177,48 @@
             <h2 id="modal-title" style="margin-top: 15px; font-size: 24px; font-weight: 800; color: #0f172a; line-height: 1.3;">Paper Title</h2>
         </div>
 
-        <div style="padding: 30px;">
+        <div id="loadingState" class="loading-container">
+            <div class="spinner"></div>
+            <h4>Analyzing Content with Gemini AI...</h4>
+            <p>Extracting details and drafting your application.</p>
+        </div>
+
+        <div id="aiContent" style="padding: 30px; display: none;">
+            
+            <div class="ai-stats-grid">
+                <div class="stat-box">
+                    <div class="stat-label">Citation Score</div>
+                    <div class="stat-value" id="scoreVal">--</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-label">Vacancies</div>
+                    <div class="stat-value" id="vacanciesVal">--</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-label">Applicants</div>
+                    <div class="stat-value" id="applicantsVal">--</div>
+                </div>
+            </div>
+
             <div style="margin-bottom: 25px;">
-                <h4 style="font-size: 12px; font-weight: 700; color: #94a3b8; text-transform: uppercase; margin-bottom: 10px;">Abstract</h4>
-                <p id="modal-desc" style="color: #334155; font-size: 14px; line-height: 1.7;"></p>
+                <h4 style="font-size: 12px; font-weight: 700; color: #94a3b8; text-transform: uppercase; margin-bottom: 10px;">AI Summary</h4>
+                <p id="summaryVal" style="color: #334155; font-size: 14px; line-height: 1.7;"></p>
             </div>
 
             <div style="background: #f0fdf4; padding: 15px; border-radius: 12px; border: 1px solid #dcfce7; margin-bottom: 25px;">
                 <div style="font-size: 11px; font-weight: 800; color: #166534; text-transform: uppercase; margin-bottom: 5px;">Required Tech Stack</div>
-                <div id="modal-skills" style="color: #15803d; font-size: 13px; font-weight: 600;"></div>
+                <div id="skillsVal" style="color: #15803d; font-size: 13px; font-weight: 600;"></div>
             </div>
 
-            <div style="display: flex; gap: 15px;">
-                <a id="modal-download-link" href="#" target="_blank" style="flex: 1; padding: 14px; border: 1px solid #e2e8f0; border-radius: 10px; text-align: center; color: #0f172a; font-weight: 600; text-decoration: none; transition: 0.2s;">
-                    <i class="fa-solid fa-file-pdf" style="color: #ef4444;"></i> Download PDF
-                </a>
+            <h4 style="font-size: 12px; font-weight: 700; color: #94a3b8; text-transform: uppercase; margin-bottom: 10px;">Drafted application (Editable)</h4>
+            
+            <form id="modal-apply-form" action="" method="POST">
+                <textarea id="emailDraft" name="cover_letter" class="form-control" rows="8" style="width: 100%; padding: 15px; border: 1px solid #e2e8f0; border-radius: 12px; margin-bottom: 20px; font-family: inherit; font-size: 14px; line-height: 1.6;"></textarea>
                 
-                <form id="modal-apply-form" action="" method="POST" style="flex: 1;">
-                    <button type="submit" style="width: 100%; padding: 14px; background: #0f172a; border: none; border-radius: 10px; color: white; font-weight: 600; cursor: pointer; transition: 0.2s;">
-                        Apply Now <i class="fa-solid fa-arrow-right"></i>
-                    </button>
-                </form>
-            </div>
+                <button type="submit" style="width: 100%; padding: 16px; background: #0f172a; border: none; border-radius: 10px; color: white; font-weight: 700; cursor: pointer; transition: 0.2s; font-size: 16px;">
+                    Confirm & Send Application <i class="fa-solid fa-paper-plane" style="margin-left: 8px;"></i>
+                </button>
+            </form>
         </div>
     </div>
 </div>
@@ -183,48 +231,78 @@
         let visibleCount = 0;
 
         cards.forEach(card => {
-            // We search in Title, Description and Domain
             let title = card.querySelector('.title-text').innerText.toLowerCase();
             let desc = card.querySelector('.desc-text').innerText.toLowerCase();
             let domain = card.querySelector('.domain-text').innerText.toLowerCase();
 
             if(title.includes(filter) || desc.includes(filter) || domain.includes(filter)) {
-                card.style.display = "flex"; // Show match
+                card.style.display = "flex";
                 visibleCount++;
             } else {
-                card.style.display = "none"; // Hide mismatch
+                card.style.display = "none";
             }
         });
 
-        // Toggle "No Results" message
         let noResultsMsg = document.getElementById('noResults');
-        if (visibleCount === 0) {
-            noResultsMsg.style.display = 'block';
-        } else {
-            noResultsMsg.style.display = 'none';
-        }
+        noResultsMsg.style.display = (visibleCount === 0) ? 'block' : 'none';
     });
 
 
-    // --- MODAL LOGIC (Existing) ---
-    function openPaperModal(id, title, desc, type, skills, pdfLink) {
-        document.getElementById('modal-title').innerText = title;
-        document.getElementById('modal-desc').innerText = desc;
-        document.getElementById('modal-skills').innerText = skills;
-        document.getElementById('modal-domain').innerText = type;
-        document.getElementById('modal-apply-form').action = "/apply/" + id;
-        
-        var downloadBtn = document.getElementById('modal-download-link');
-        if (pdfLink && pdfLink !== 'None' && pdfLink !== '') {
-            downloadBtn.href = pdfLink;
-            downloadBtn.style.display = 'block';
-        } else {
-            downloadBtn.style.display = 'none';
-            document.getElementById('modal-apply-form').style.flex = "2";
-        }
-
+    // --- UPDATED AI ANALYSIS LOGIC ---
+    function analyzeAndApply(id, content, title, type, realVacancies) {
+        // 1. Show Modal & Loading State
         var modal = document.getElementById('paperModal');
         modal.classList.add('show-modal');
+        
+        // Reset Modal Content
+        document.getElementById('modal-title').innerText = title;
+        document.getElementById('modal-domain').innerText = type;
+        document.getElementById('loadingState').style.display = 'block';
+        document.getElementById('aiContent').style.display = 'none';
+        
+        // Set Form Action
+        document.getElementById('modal-apply-form').action = "/apply/" + id;
+
+        // Use real vacancies if set, otherwise wait for AI
+        if (realVacancies && realVacancies !== 'None') {
+            document.getElementById('vacanciesVal').innerText = realVacancies;
+        }
+
+        // 2. Call AI API
+        fetch('/optimize', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ content: content }) // Send URL OR Description
+        })
+        .then(response => response.json())
+        .then(data => {
+            // 3. Populate Data & Show Content
+            document.getElementById('loadingState').style.display = 'none';
+            document.getElementById('aiContent').style.display = 'block';
+
+            if (data.analysis) {
+                document.getElementById('scoreVal').innerText = data.analysis.citation_score;
+                
+                // Only overwrite vacancies if professor didn't set them
+                if (!realVacancies || realVacancies === 'None') {
+                    document.getElementById('vacanciesVal').innerText = data.analysis.vacancies;
+                }
+                
+                document.getElementById('applicantsVal').innerText = data.analysis.applicants;
+                document.getElementById('summaryVal').innerText = data.analysis.summary;
+                document.getElementById('skillsVal').innerText = data.analysis.skills.join(', ');
+                document.getElementById('emailDraft').value = data.application;
+            } else {
+                document.getElementById('summaryVal').innerText = "AI could not extract details. Please write your application manually.";
+                document.getElementById('emailDraft').value = "Dear Professor,\n\nI am interested in...";
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            document.getElementById('loadingState').style.display = 'none';
+            document.getElementById('aiContent').style.display = 'block';
+            document.getElementById('summaryVal').innerText = "Connection Error. Please try again.";
+        });
     }
 
     function closeModal() {

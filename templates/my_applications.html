@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>My Applications | DevSync</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    
+    <style>
+        :root {
+            --primary-color: #4f46e5; /* Indigo */
+            --primary-hover: #4338ca;
+            --bg-color: #f3f4f6;
+            --card-bg: #ffffff;
+            --text-dark: #1f2937;
+            --text-muted: #6b7280;
+            --success-bg: #d1fae5;
+            --success-text: #065f46;
+            --pending-bg: #fef3c7;
+            --pending-text: #92400e;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            font-family: 'Inter', sans-serif;
+            color: var(--text-dark);
+        }
+
+        .page-header {
+            margin-bottom: 2rem;
+            padding-top: 1rem;
+        }
+
+        .btn-back {
+            color: var(--text-muted);
+            font-weight: 600;
+            text-decoration: none;
+            transition: color 0.2s;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .btn-back:hover {
+            color: var(--primary-color);
+        }
+
+        /* Application Card Design */
+        .app-card {
+            background: var(--card-bg);
+            border-radius: 16px;
+            border: 1px solid rgba(0,0,0,0.05);
+            padding: 1.5rem;
+            margin-bottom: 1rem;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .app-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 12px 24px -8px rgba(0, 0, 0, 0.1);
+            border-color: rgba(79, 70, 229, 0.2);
+        }
+
+        .app-card::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            top: 0;
+            height: 100%;
+            width: 4px;
+            background: var(--primary-color);
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+
+        .app-card:hover::before {
+            opacity: 1;
+        }
+
+        .app-title {
+            font-weight: 700;
+            font-size: 1.1rem;
+            margin-bottom: 0.25rem;
+            color: var(--text-dark);
+        }
+
+        .app-meta {
+            color: var(--text-muted);
+            font-size: 0.9rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        /* Status Badges */
+        .status-badge {
+            padding: 0.5rem 1rem;
+            border-radius: 9999px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .status-selected {
+            background-color: var(--success-bg);
+            color: var(--success-text);
+        }
+
+        .status-pending {
+            background-color: var(--pending-bg);
+            color: var(--pending-text);
+        }
+
+        /* Empty State */
+        .empty-state {
+            text-align: center;
+            padding: 4rem 2rem;
+            color: var(--text-muted);
+        }
+        .empty-icon {
+            font-size: 4rem;
+            color: #d1d5db;
+            margin-bottom: 1.5rem;
+        }
+
+        .date-badge {
+            font-size: 0.75rem;
+            background: #f3f4f6;
+            padding: 2px 8px;
+            border-radius: 4px;
+            color: #6b7280;
+        }
+    </style>
+</head>
+<body class="p-4">
+    <div class="container" style="max-width: 800px;">
+        
+        <div class="page-header d-flex justify-content-between align-items-center">
+            <div>
+                <a href="/papers" class="btn-back mb-2">
+                    <i class="fas fa-arrow-left"></i> Back to Opportunities
+                </a>
+                <h2 class="fw-bold m-0">My Applications</h2>
+                <p class="text-muted small mt-1">Track your progress and application status.</p>
+            </div>
+            <div class="d-none d-md-block">
+                <div class="bg-white p-2 rounded-circle shadow-sm">
+                    <img src="https://ui-avatars.com/api/?name={{ current_user.full_name }}&background=4f46e5&color=fff" class="rounded-circle" width="45" alt="Profile">
+                </div>
+            </div>
+        </div>
+
+        {% if applications %}
+            {% for app in applications %}
+            <div class="app-card d-flex flex-column flex-md-row justify-content-between align-items-start align-items-md-center gap-3">
+                
+                <div class="d-flex align-items-start gap-3">
+                    <div class="p-3 rounded bg-light text-primary d-flex align-items-center justify-content-center" style="width: 50px; height: 50px;">
+                        <i class="fas fa-file-alt fa-lg"></i>
+                    </div>
+                    <div>
+                        {% if app.internship %}
+                            <div class="app-title">{{ app.internship.title }}</div>
+                            <div class="app-meta">
+                                <i class="fas fa-tag fa-xs"></i> {{ app.internship.domain }}
+                                <span class="mx-2">•</span>
+                                <span class="date-badge">{{ app.internship.type }}</span>
+                            </div>
+                        {% else %}
+                            <div class="app-title">Cold Email Application</div>
+                            <div class="app-meta">
+                                <i class="fas fa-envelope-open-text fa-xs"></i> Direct Outreach
+                            </div>
+                        {% endif %}
+                    </div>
+                </div>
+                
+                <div class="d-flex flex-column align-items-end">
+                    {% if app.status == 'Selected' %}
+                        <div class="status-badge status-selected shadow-sm">
+                            <i class="fas fa-check-circle"></i> Selected
+                        </div>
+                    {% else %}
+                        <div class="status-badge status-pending">
+                            <i class="fas fa-clock"></i> Pending Review
+                        </div>
+                    {% endif %}
+                </div>
+
+            </div>
+            {% endfor %}
+        
+        {% else %}
+            <div class="empty-state">
+                <div class="empty-icon">
+                    <i class="fas fa-folder-open"></i>
+                </div>
+                <h4>No applications yet</h4>
+                <p>Start exploring research papers and apply to your first opportunity!</p>
+                <a href="/papers" class="btn btn-primary mt-3 px-4 py-2 rounded-pill fw-semibold">
+                    Find Opportunities
+                </a>
+            </div>
+        {% endif %}
+
+    </div>
+</body>
+</html>

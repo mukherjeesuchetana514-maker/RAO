@@ -86,6 +86,7 @@
     .tag-domain { background: #eef2ff; color: #4f46e5; }
     .tag-remote { background: #f0fdf4; color: #16a34a; } /* Green */
     .tag-onsite { background: #eff6ff; color: #2563eb; } /* Blue */
+    .tag-vacancies { background: #fff7ed; color: #c2410c; } /* Orange */
 
     .stat-box { text-align: center; margin-right: 20px; }
     .stat-num { font-size: 24px; font-weight: 800; color: #0f172a; }
@@ -136,6 +137,8 @@
                 <input type="text" name="title" class="input-modern" placeholder="Research Title (e.g. NLP for Healthcare)" required>
                 <input type="text" name="domain" class="input-modern" placeholder="Domain (e.g. Artificial Intelligence)" required>
             </div>
+
+            <input type="text" name="vacancies" class="input-modern" placeholder="Number of Vacancies (e.g. 2)" style="margin-bottom: 20px;" required>
             
             <textarea name="description" class="input-modern" placeholder="Describe the research, requirements, and expected outcomes..." rows="3" style="margin-bottom: 20px; resize: none;"></textarea>
             
@@ -165,6 +168,9 @@
                     <span class="tag tag-domain">{{ job.domain }}</span>
                     <span class="tag {{ 'tag-remote' if job.type == 'Remote' else 'tag-onsite' }}">
                         {{ job.type }}
+                    </span>
+                    <span class="tag tag-vacancies">
+                        <i class="fa-solid fa-users"></i> {{ job.vacancies }} Open
                     </span>
                 </div>
             </div>

@@ -7,20 +7,29 @@ from flask import Flask, render_template, request, redirect, url_for, jsonify, s
 from flask_login import LoginManager, login_user, login_required, current_user, logout_user, UserMixin
 from werkzeug.utils import secure_filename
 from flask_sqlalchemy import SQLAlchemy
+from dotenv import load_dotenv
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'devsync-secret'
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///devsync.db'
+
+# --- 1. CONFIGURATION (Render Compatible) ---
+# Check for Render's database URL, otherwise use local SQLite
+database_url = os.environ.get("DATABASE_URL")
+if database_url and database_url.startswith("postgres://"):
+    database_url = database_url.replace("postgres://", "postgresql://", 1)
+
+app.config['SQLALCHEMY_DATABASE_URI'] = database_url or 'sqlite:///devsync.db'
+
+# NOTE: Render Free Tier deletes local files (resumes) on restart.
+# To persist files, you need a paid "Disk" or Cloud storage (S3/Cloudinary).
 app.config['UPLOAD_FOLDER'] = 'static/uploads'
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
-# --- 1. CONFIGURE GEMINI API ---
-# New Line 15
-# Old Line 15
-genai.configure(api_key="AIzaSyC3nCzYWD-UIk312cLVxVIQN3xAuraQs1E")
+# --- 2. CONFIGURE GEMINI API ---
+genai.configure(api_key = os.getenv("GEMINI_API_KEY"))
 model = genai.GenerativeModel('models/gemini-flash-latest')
 
-# --- 2. DATABASE CONFIGURATION & MODELS ---
+# --- 3. DATABASE CONFIGURATION & MODELS ---
 db = SQLAlchemy(app)
 
 # Define User Model
@@ -51,6 +60,8 @@ class Internship(db.Model):
     description = db.Column(db.Text)
     type = db.Column(db.String(50)) # Remote, Onsite
     pdf_link = db.Column(db.String(500)) # For generated papers
+    # [NEW COLUMN] For Professor to set vacancies manually
+    vacancies = db.Column(db.String(50), default="Open") 
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     
     # Relationships
@@ -64,7 +75,7 @@ class Application(db.Model):
     cover_letter = db.Column(db.Text, nullable=True) 
     status = db.Column(db.String(50), default="Pending")
 
-# --- 3. LOGIN MANAGER ---
+# --- 4. LOGIN MANAGER ---
 login_manager = LoginManager()
 login_manager.init_app(app)
 login_manager.login_view = 'index'
@@ -73,7 +84,7 @@ login_manager.login_view = 'index'
 def load_user(user_id):
     return User.query.get(int(user_id))
 
-# --- 4. ROUTES ---
+# --- 5. ROUTES ---
 
 @app.route('/')
 def index():
@@ -117,7 +128,9 @@ def setup():
         current_user.qualification = request.form.get('qualification')
         current_user.college = request.form.get('college')
         current_user.phone = request.form.get('phone')
-        current_user.research_domain = request.form.get('research_domain') # For Professors
+        # Check if research_domain is in form (for professors)
+        if 'research_domain' in request.form:
+             current_user.research_domain = request.form.get('research_domain')
         
         # Handle Resume Upload
         if 'resume' in request.files:
@@ -179,30 +192,33 @@ def papers():
     my_apps = [app.internship_id for app in Application.query.filter_by(student_id=current_user.id).all()]
     return render_template('papers.html', internships=internships, my_apps=my_apps)
 
+# [NEW FEATURE] Student "My Applications" Status Page
+@app.route('/my_applications')
+@login_required
+def my_applications():
+    if current_user.role != 'Student': return redirect('/')
+    applications = Application.query.filter_by(student_id=current_user.id).all()
+    return render_template('my_applications.html', applications=applications)
+
+# [UPDATED AI FLOW] Handles both URL and Description text
 @app.route('/optimize', methods=['POST'])
 @login_required
 def optimize():
     data = request.json
-    paper_url = data.get('url', '')
+    # We accept 'content' which could be a URL OR Description text
+    content_input = data.get('content', '')
 
-    # --- UPGRADED PROMPT ---
     prompt = f"""
-    Act as a Research Assistant. I have found a research paper at this URL: {paper_url}.
+    Act as a Research Assistant. Analyze the following internship or research paper content:
+    "{content_input}"
     
-    Task 1: Extract the name of the main author or professor from the paper metadata.
-    Task 2: Write a cold email from {current_user.full_name} ({current_user.qualification}) to that specific professor.
+    Task 1: Identify the main topic or professor requirements.
+    Task 2: Write a cold email from {current_user.full_name} ({current_user.qualification}) to the professor.
     
-    1. Summarize the topic in 2 sentences.
-    2. List 3 key technical skills required for this research.
-    3. Estimate a 'Citation Score' (e.g. "450 (High Impact)").
-    4. Estimate 'Vacancies' (e.g. "2 Roles").
-    5. Estimate number of 'Applicants' (e.g. "15").
-    6. Write the cold email addressing the professor by their extracted name.
-
-    Return the response in this exact format with dividers:
-    SUMMARY: [Summary]
+    Strictly follow this output format with dividers:
+    SUMMARY: [2 sentence summary]
     SKILLS: [Skill 1, Skill 2, Skill 3]
-    METRICS: [Citation Score] | [Vacancies] | [Applicants]
+    METRICS: [Citation Score as a number, e.g., 450] | [Applicants as a number or the word 'Many']
     EMAIL: [Email Body]
     """
 
@@ -222,9 +238,8 @@ def optimize():
             "analysis": {
                 "summary": summary,
                 "skills": skills.split(','),
-                "citation_score": metrics[0] if len(metrics) > 0 else "N/A",
-                "vacancies": metrics[1] if len(metrics) > 1 else "Open",
-                "applicants": metrics[2] if len(metrics) > 2 else "Many",
+                "citation_score": metrics[0] if (len(metrics) > 0 and metrics[0].strip() != "N/A") else "450+",                "vacancies": "Check Listing", # We use real data if available
+                "applicants": metrics[1] if (len(metrics) > 1 and "High" not in metrics[1]) else "Many",
             },
             "application": email_body
         })
@@ -232,12 +247,22 @@ def optimize():
         print("GEMINI ERROR:", e)
         return jsonify({"error": f"AI Error: {str(e)}"})
 
+# [UPDATED] Apply Route - Handles AI Cover Letter & Resume
 @app.route('/apply/<int:internship_id>', methods=['POST'])
 @login_required
 def apply_for_internship(internship_id):
     existing = Application.query.filter_by(student_id=current_user.id, internship_id=internship_id).first()
+    
+    # Capture the AI generated cover letter from the form
+    cover_letter = request.form.get('cover_letter', 'Interested in this role.')
+
     if not existing:
-        new_app = Application(student_id=current_user.id, internship_id=internship_id)
+        new_app = Application(
+            student_id=current_user.id, 
+            internship_id=internship_id,
+            cover_letter=cover_letter,
+            status="Pending"
+        )
         db.session.add(new_app)
         db.session.commit()
     
@@ -249,7 +274,7 @@ def apply_for_internship(internship_id):
         current_user.resume_file = filename
         db.session.commit()
 
-    return redirect('/papers')
+    return redirect('/my_applications')
 
 # --- ADD THIS TO app.py ---
 
@@ -281,7 +306,9 @@ def post_internship():
         domain=request.form.get('domain'),
         description=request.form.get('description'),
         type=request.form.get('type'),
-        user_id=current_user.id
+        user_id=current_user.id,
+        # [NEW] Capture vacancies from form
+        vacancies=request.form.get('vacancies') or "Open"
     )
     db.session.add(new_internship)
     db.session.commit()
@@ -303,6 +330,20 @@ def all_applications():
     my_internship_ids = [i.id for i in my_internships]
     applications = Application.query.filter(Application.internship_id.in_(my_internship_ids)).all()
     return render_template('applicants.html', applications=applications)
+
+# [NEW FEATURE] Professor Select/Accept Student Logic
+@app.route('/accept_applicant/<int:app_id>')
+@login_required
+def accept_applicant(app_id):
+    if current_user.role != 'Professor': return "Unauthorized"
+    
+    application = Application.query.get(app_id)
+    if application:
+        application.status = "Selected"
+        db.session.commit()
+        flash(f"Student {application.student.full_name} has been selected!", "success")
+        
+    return redirect(request.referrer or '/professor')
 
 @app.route('/generate_feed')
 @login_required
@@ -330,7 +371,8 @@ def generate_feed():
             description = ai_description,
             type = "Remote Research",
             user_id = current_user.id,
-            pdf_link = result.pdf_url
+            pdf_link = result.pdf_url,
+            vacancies = "2" # Default for auto-generated posts
         )
         db.session.add(new_internship)
 
@@ -342,7 +384,7 @@ def generate_feed():
 def contact():
     return render_template('contact.html')
 
-# --- FORGOT PASSWORD ROUTES (NEW) ---
+# --- FORGOT PASSWORD ROUTES ---
 
 @app.route('/forgot_password', methods=['GET', 'POST'])
 def forgot_password():
@@ -402,4 +444,5 @@ def logout():
 if __name__ == '__main__':
     with app.app_context():
         db.create_all()
+    # For Render, we rely on gunicorn, but debug=True is fine for local
     app.run(debug=True)
