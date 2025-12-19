@@ -215,11 +215,12 @@ def optimize():
     prompt = f"""
     Act as a Research Assistant. Analyze the following internship or research paper content:
     "{content_input}"
-    
-    Task 1: Identify the main topic or professor requirements.
-    Task 2: Write a cold email from {current_user.full_name} ({current_user.qualification}) to the professor.
+    Task 1: Extract the Lead Author's Full Name (this is the Professor).
+    Task 2: Identify the main topic or professor requirements.
+    Task 3: Write a cold email from {current_user.full_name} ({current_user.qualification}) to the professor.
     
     Strictly follow this output format with dividers:
+    PROFESSOR: [Name]
     SUMMARY: [2 sentence summary]
     SKILLS: [Skill 1, Skill 2, Skill 3]
     METRICS: [Citation Score as a number, e.g., 450] | [Applicants as a number or the word 'Many']
@@ -449,4 +450,3 @@ if __name__ == '__main__':
     with app.app_context():
         db.create_all()
     # For Render, we rely on gunicorn, but debug=True is fine for local
-    app.run(debug=True)
