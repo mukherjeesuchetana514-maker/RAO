@@ -625,29 +625,29 @@ def generate_feed():
         return "Unauthorized"
 
     try:
-        # Create the client
         client = arxiv.Client()
-
-        # Search for recent AI papers (Reduced to 3 for speed)
         search = arxiv.Search(
             query="artificial intelligence",
-            max_results=3,  # Reduced from 5 to prevent timeouts
+            max_results=3,
             sort_by=arxiv.SortCriterion.SubmittedDate,
         )
 
         count = 0
         for result in client.results(search):
-            # Skip if this paper already exists in DB to save time
             if Internship.query.filter_by(title=result.title).first():
                 continue
 
             try:
-                # Try AI Summarization
                 prompt = f"Summarize this research abstract into a 2-sentence internship opportunity description: {result.summary}"
                 response = active_model.generate_content(prompt)
                 ai_description = response.text
+
+                # --- NEW ADDITION: PAUSE FOR 5 SECONDS ---
+                print("Sleeping for 5s to respect API quota...")
+                time.sleep(5)
+                # -----------------------------------------
+
             except Exception as e:
-                # Fallback if AI fails or times out
                 print(f"AI Summary failed: {e}")
                 ai_description = result.summary[:300] + "..."
 
