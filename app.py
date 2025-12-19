@@ -697,6 +697,69 @@ def logout():
     return redirect("/")
 
 
+# --- TEMPORARY ROUTE TO INITIALIZE DATABASE ---
+@app.route("/seed_database")
+def seed_database():
+    # 1. Create Tables
+    db.create_all()
+
+    # 2. Create Professor Account
+    if not User.query.filter_by(email="prof@mit.edu").first():
+        prof = User(
+            email="prof@mit.edu",
+            password="123",
+            role="Professor",
+            full_name="Dr. Elara Vance",
+        )
+        db.session.add(prof)
+        db.session.commit()
+
+    # 3. Add Research Papers
+    prof = User.query.filter_by(email="prof@mit.edu").first()
+
+    papers = [
+        {
+            "title": "Attention Is All You Need",
+            "domain": "Deep Learning",
+            "type": "Remote",
+            "desc": "The seminal paper introducing the Transformer architecture, the foundation of modern LLMs like GPT.",
+        },
+        {
+            "title": "YOLOv8: Real-Time Detection",
+            "domain": "Computer Vision",
+            "type": "Onsite",
+            "desc": "State-of-the-art real-time object detection model offering SOTA performance on COCO dataset.",
+        },
+        {
+            "title": "BERT: Pre-training of Deep Transformers",
+            "domain": "NLP",
+            "type": "Hybrid",
+            "desc": "Bidirectional Encoder Representations from Transformers (BERT) revolutionized NLP tasks.",
+        },
+        {
+            "title": "Llama 2: Open Foundation Models",
+            "domain": "Generative AI",
+            "type": "Remote",
+            "desc": "A collection of open-source pretrained and fine-tuned large language models (LLMs).",
+        },
+    ]
+
+    for p in papers:
+        if not Internship.query.filter_by(title=p["title"]).first():
+            new_paper = Internship(
+                title=p["title"],
+                domain=p["domain"],
+                type=p["type"],
+                description=p["desc"],
+                required_skills="Python, PyTorch, Research",
+                user_id=prof.id,
+            )
+            db.session.add(new_paper)
+
+    db.session.commit()
+    return "✅ Database initialized! <a href='/'>Go to Home</a>"
+
+
 if __name__ == "__main__":
     with app.app_context():
         db.create_all()
