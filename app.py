@@ -55,48 +55,29 @@ if api_key:
 
 
 def get_active_model():
-    """Dynamically finds the best available Gemini model."""
-    if not api_key:
-        print("⚠️ No API Key found.")
-        return None
-
+    """Finds a working Gemini model dynamically."""
     try:
-        # 1. Get list of ALL available models for your API key
-        available_models = [
-            m.name
-            for m in genai.list_models()
-            if "generateContent" in m.supported_generation_methods
-        ]
-        print(f"📋 Available Models: {available_models}")
-
-        # 2. Define our preference order (Best/Cheapest -> Older)
-        preferences = [
-            "models/gemini-1.5-flash",
-            "models/gemini-1.5-flash-001",
-            "models/gemini-1.5-flash-002",
-            "models/gemini-1.5-flash-latest",
-            "models/gemini-pro",
-            "models/gemini-1.0-pro",
-        ]
-
-        # 3. Pick the first preference that exists in your account
-        for model_name in preferences:
-            if model_name in available_models:
-                print(f"✅ Selected Model: {model_name}")
-                return genai.GenerativeModel(model_name)
-
-        # 4. Fallback: If none of our preferences match, pick the first available one
-        if available_models:
-            first_model = available_models[0]
-            print(f"⚠️ Preferred models missing. Falling back to: {first_model}")
-            return genai.GenerativeModel(first_model)
-
+        if not api_key:
+            return None
+        # 1. Prefer Flash (Faster/Cheaper)
+        for m in genai.list_models():
+            if (
+                "generateContent" in m.supported_generation_methods
+                and "flash" in m.name.lower()
+            ):
+                print(f"✅ Using Model: {m.name}")
+                return genai.GenerativeModel(m.name)
+        # 2. Fallback to Pro
+        for m in genai.list_models():
+            if (
+                "generateContent" in m.supported_generation_methods
+                and "pro" in m.name.lower()
+            ):
+                return genai.GenerativeModel(m.name)
+        return genai.GenerativeModel("gemini-1.5-flash")
     except Exception as e:
-        print(f"❌ Error listing models: {e}")
-        # Final "Hail Mary" fallback
+        print(f"Model Error: {e}")
         return genai.GenerativeModel("gemini-pro")
-
-    return None
 
 
 active_model = get_active_model()

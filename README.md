@@ -2,9 +2,7 @@
 ## Page 1: Project Overview & Getting Started
 ### 1. Executive Summary
 Project Name: Research Application Optimizer (RAO)  
-
 Version: 2.0 (AI Powered)  
-
 The Research Application Optimizer (RAO) is a specialized web platform designed to bridge the gap between students seeking research internships and professors looking for talent. Unlike standard job boards, RAO leverages Generative AI (Google Gemini) to analyze research papers and lab websites, helping students generate hyper-personalized cold emails and cover letters. It provides a dual-interface system: a management dashboard for Professors to post opportunities and review applicants, and an "Optimizer" toolkit for Students to find, analyze, and apply to research positions effectively.
 ### 2. Technical Stack
 The application is built as a monolithic web application using the following technologies:
@@ -27,21 +25,17 @@ The application is built as a monolithic web application using the following tec
 2.	Install Dependencies
     Navigate to the project root and install the required Python packages.
 > pip install -r requirements.txt
-
 3.	Environment Configuration
     Create a .env file in the root directory (if not present) and add your API key:
 > GEMINI_API_KEY=your_google_gemini_api_key_here
 > DATABASE_URL=sqlite:///devsync.db
-
 4.	Database Initialization
     Initialize the database and seed it with default data (like a demo Professor account and trending papers).
 > python seed.py
-
     This script creates instance/devsync.db and adds a default professor (prof@mit.edu / 123).
 5.	Running the Application
     Start the Flask development server:
 > python app.py
-
 ---
 The application will launch at http://127.0.0.1:5000/.
 ## Page 2: System Architecture & Data Models
@@ -82,19 +76,27 @@ The optimize() function in app.py is the application's brain. It executes the fo
 -	Analysis: Citation score, vacancy estimation.
 -	Draft: A highly specific, personalized cold email.
 ---
-
 ## Page 3: User Guide & Workflows
 ### 1. Student Workflow
 Students use the platform to find opportunities and craft high-quality applications.
-*	Dashboard (/student): The "Optimizer" interface.
+
+![WhatsApp Image 2025-12-19 at 22 34 25_f7373bb0](https://github.com/user-attachments/assets/be322a74-5542-417a-84d6-bc0719e86047)
+
+
+#### *	Dashboard (/student): The "Optimizer" interface.
  *	Input: Paste a link to a research paper (ArXiv) or a job description.
  *	Process: Click "Optimize". The system analyzes the text in real-time.
  *	Result: View a summary, required skills, and an editable AI-drafted email.
-*	Trending Opportunities (/papers): A feed of open positions posted by professors.
+ *	Trending Opportunities (/papers): A feed of open positions posted by professors.
  *	Students can "Quick Apply" or use "Review & Apply" to let AI analyze the posting before applying.
 *	Application Tracking (/my_applications): View status of sent applications (Pending/Selected).
+
 ### 2. Professor Workflow
 Professors use the platform to manage recruitment overhead.
+
+![WhatsApp Image 2025-12-19 at 22 35 01_c5e359f8](https://github.com/user-attachments/assets/1ba4eea2-86d6-4097-83c3-06c938aa3e96)
+
+
 #### *	Dashboard (/professor):
  *	Post Opportunity: Manually create a listing for a specific project.
  *	Auto-Generate Feed: One-click feature that fetches the latest AI papers from ArXiv and converts them into draft internship listings automatically.
@@ -102,6 +104,7 @@ Professors use the platform to manage recruitment overhead.
  *	View a table of candidates.
  *	Actions: Download attached Resumes (PDF), read the specific Cover Letter, and "Select" candidates.
  *	Inbox: A specific inbox for "Cold Applications" (unsolicited applications generated via the Optimizer).
+ 
 ### 3. Key Features Breakdown
 | Feature | Description | Tech Used |
 | :---       | :---:        | ---:        |
